@@ -50,7 +50,7 @@ class CANGenerator:
             msg = can.Message(
                 arbitration_id=0x200,
                 is_extended_id=False,
-                dlc=8,  # 고의 불일치
+                dlc=random.randint(3,9),  # 고의 불일치
                 data=data
             )
 
