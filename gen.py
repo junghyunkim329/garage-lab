@@ -24,15 +24,17 @@ class CANGenerator:
     def send_timestamp_anomaly(self, count=100):
         for _ in range(count):
             # 현재 시간 ± 랜덤 오프셋
-            offset = random.uniform(-5, 5)
-            fake_ts = time.time() + offset
+            offset = random.uniform(-5, 5) + random.random()
+            fake_ts = int(time.time() + offset)
 
+            ts_bytes = fake_ts.to_bytes(4,byteorder='big',signed=False)
+
+            rand_bytes = [random.randint(0,255) for _ in range(4)]
             msg = can.Message(
                 arbitration_id=0x100,
                 is_extended_id=False,
                 dlc=8,
-                data=[random.randint(0, 255) for _ in range(8)],
-                timestamp=fake_ts
+                data=list(ts_bytes) + rand_bytes,
             )
 
             self.bus.send(msg)
