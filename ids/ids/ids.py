@@ -46,17 +46,25 @@ class CAN_IDS:
 
 
         # 1. Timestamp anomaly
-        log(f"[TS] current={msg.timestamp}, last={self.last_timestamp}")
+        ts = int.from_bytes(msg.data[:4], byteorder='big', signed=False)
+        now = int(time.time())
 
-        if msg.timestamp < self.last_timestamp:
+        log(f"[TS] extracted={ts}, last={self.last_timestamp}")
+        # rollback 탐지
+        if ts < self.last_timestamp:
             alerts.append("Timestamp rollback")
             log(f"Timestamp_anomaly_alerts======{alerts}")
 
-        if now - msg.timestamp > TIMESTAMP_TOLERANCE:
+        # replay 탐지
+        TIMESTAMP_TOLERANCE = 5  # 초 단위 허용 범위
+        if now - ts > TIMESTAMP_TOLERANCE:
             alerts.append("Replay (old timestamp)")
             log(f"Timestamp_anomaly_alerts======{alerts}")
 
-        self.last_timestamp = msg.timestamp
+        # 마지막 timestamp 갱신
+        self.last_timestamp = ts
+        log(f"RAW DATA:{list(msg.data)}")
+        log(f"PARSED TS: {ts}, NOW: {now}")
 
         # 2. DLC mismatch
         log(f"msg.dlc_data======{msg.dlc}, msg.data_actual======{len(msg.data)}")
