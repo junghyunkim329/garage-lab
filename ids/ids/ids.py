@@ -1,116 +1,161 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# CAN IDS: flood / timestamp anomaly / DLC mismatch
+
 import can
 import time
-from collections import deque
+from collections import defaultdict, deque
 
-# -----------------------------
+# ==========================================
 # 설정값
-# -----------------------------
-INPUT_CHANNEL = "can0"
+# ==========================================
+INPUT_CHANNEL        = "can0"
+FLOOD_THRESHOLD      = 500
+TIME_WINDOW          = 1.0
+TIMESTAMP_TOLERANCE  = 10.0
 
-FLOOD_THRESHOLD = 100     # 초당 메시지 수
-TIME_WINDOW = 1.0         # 초
-TIMESTAMP_TOLERANCE = 1.0 # 과거 허용 범위
-DEBUG = True
+TIMESTAMP_CHECK_IDS  = {0x100}
+IS_CAN_FD            = False
 
-# -----------------------------
-# 디버그 출력 함수
-# -----------------------------
-def log(*args):#*arg의미 arg를 여러개 받겠다는 의미이다.
-    if DEBUG:
-        print("[DEBUG]", *args)
 
-# -----------------------------
-# IDS 클래스 (탐지만 수행)
-# -----------------------------
 class CAN_IDS:
-    def __init__(self):
-        self.bus = can.interface.Bus(
-            interface="socketcan",
-            channel=INPUT_CHANNEL
+    def __init__(self, is_fd: bool = IS_CAN_FD):
+        self.bus    = self._connect()
+        self.is_fd  = is_fd
+
+        self._id_times:        dict[int, deque] = defaultdict(
+            lambda: deque(maxlen=FLOOD_THRESHOLD + 200)
+        )
+        self._last_payload_ts: dict[int, int]   = defaultdict(int)
+
+        # 통계
+        self._total    = 0
+        self._normal   = 0
+        self._abnormal = 0
+
+    # ------------------------------------------
+    # 연결 / 재연결
+    # ------------------------------------------
+    def _connect(self) -> can.BusABC:
+        while True:
+            try:
+                bus = can.interface.Bus(
+                    interface="socketcan",
+                    channel=INPUT_CHANNEL,
+                    receive_own_messages=False,
+                )
+                print(f"[*] IDS listening on {INPUT_CHANNEL}")
+                return bus
+            except Exception as e:
+                print(f"[!] Connect failed: {e} — retry in 2s")
+                time.sleep(2)
+
+    def _reconnect(self):
+        try:
+            self.bus.shutdown()
+        except Exception:
+            pass
+        time.sleep(1)
+        self.bus = self._connect()
+
+    # ------------------------------------------
+    # 탐지 로직
+    # ------------------------------------------
+    def detect(self, msg: can.Message) -> list[str]:
+        alerts   = []
+        arb_id   = msg.arbitration_id
+        now_mono = time.monotonic()
+
+        # ── 1. Timestamp anomaly ──────────────────────────────────────────
+        if arb_id in TIMESTAMP_CHECK_IDS and len(msg.data) >= 4:
+            payload_ts = int.from_bytes(msg.data[:4], byteorder="big", signed=False)
+            last_ts    = self._last_payload_ts[arb_id]
+            now_sys    = int(time.time())
+            diff       = now_sys - payload_ts       # 양수: 과거, 음수: 미래
+
+            if diff > TIMESTAMP_TOLERANCE:
+                alerts.append(f"Timestamp too old ({diff}s ago)")
+            elif diff < -TIMESTAMP_TOLERANCE:
+                alerts.append(f"Timestamp in future ({-diff}s ahead)")
+
+            if not alerts:
+                self._last_payload_ts[arb_id] = payload_ts
+
+        # ── 2. DLC > 8 (Classic CAN) ─────────────────────────────────────
+        max_dlc = 64 if self.is_fd else 8
+        if msg.dlc > max_dlc:
+            alerts.append(f"Invalid DLC ({msg.dlc} > {max_dlc})")
+
+        # ── 3. Flooding ───────────────────────────────────────────────────
+        q = self._id_times[arb_id]
+        q.append(now_mono)
+        while q and (now_mono - q[0]) > TIME_WINDOW:
+            q.popleft()
+
+        if len(q) > FLOOD_THRESHOLD:
+            alerts.append(f"Flooding ({len(q)} frames/s)")
+
+        return alerts
+
+    # ------------------------------------------
+    # 메인 루프
+    # ------------------------------------------
+    def _print_summary(self):
+        print(
+            f"\n{'─'*48}\n"
+            f"  총 수신   {self._total:>6} 패킷\n"
+            f"  정상      {self._normal:>6} 패킷\n"
+            f"  이상 탐지 {self._abnormal:>6} 패킷\n"
+            f"{'─'*48}"
         )
 
-        self.msg_times = deque()
-        self.last_timestamp = 0
-
-    # -----------------------------
-    # 탐지 로직
-    # -----------------------------
-    def detect(self, msg):
-        alerts = []
-        now = time.time()
-
-        
-        # 메시지 요약 출력
-        log("--------------------------------------------------")
-        log(f"NEW MESSAGE: ID=0x{msg.arbitration_id:X}, ts={msg.timestamp}, dlc={msg.dlc}, data={msg.data}")
-
-
-        # 1. Timestamp anomaly
-        ts = int.from_bytes(msg.data[:4], byteorder='big', signed=False)
-        now = int(time.time())
-
-        log(f"[TS] extracted={ts}, last={self.last_timestamp}")
-        # rollback 탐지
-        if ts < self.last_timestamp:
-            alerts.append("Timestamp rollback")
-            log(f"Timestamp_anomaly_alerts======{alerts}")
-
-        # replay 탐지
-        TIMESTAMP_TOLERANCE = 5  # 초 단위 허용 범위
-        if now - ts > TIMESTAMP_TOLERANCE:
-            alerts.append("Replay (old timestamp)")
-            log(f"Timestamp_anomaly_alerts======{alerts}")
-
-        # 마지막 timestamp 갱신
-        self.last_timestamp = ts
-        log(f"RAW DATA:{list(msg.data)}")
-        log(f"PARSED TS: {ts}, NOW: {now}")
-
-        # 2. DLC mismatch
-        log(f"msg.dlc_data======{msg.dlc}, msg.data_actual======{len(msg.data)}")
-
-        if msg.dlc is not None and msg.data is not None:
-            if msg.dlc != len(msg.data):
-                alerts.append("DLC mismatch")
-        
-        log(f"DLC_mismatch_alerts======{alerts}")
-
-        # 3. Flooding detection
-        log(f"[FLOOD] deque size={len(self.msg_times)}, window={list(self.msg_times)}")
-        
-        self.msg_times.append(now)
-
-        while self.msg_times and (now - self.msg_times[0]) > TIME_WINDOW:
-            removed = self.msg_times.popleft()#오래된 기록은 빠르게 제거할랜다.
-            log(f"[FLOOD] old timestamp removed: {removed}")
-
-        if len(self.msg_times) > FLOOD_THRESHOLD:
-            alerts.append("Flooding")
-            log("[FLOOD ALERT] Flooding detected!!")
-        return alerts
-        
-    
-    # -----------------------------
-    # 실행 루프
-    # -----------------------------
     def run(self):
-        print("[*] IDS (Detection Only) started")
+        print("[*] IDS started — Ctrl+C to stop\n")
+        consecutive_errors = 0
 
-        while True:
-            msg = self.bus.recv()
+        try:
+            while True:
+                try:
+                    msg = self.bus.recv(timeout=0.1)
+                    if msg is None:
+                        continue
 
-            if msg is None:
-                continue
+                    consecutive_errors = 0
+                    self._total += 1
+                    alerts = self.detect(msg)
 
-            alerts = self.detect(msg)
+                    if alerts:
+                        self._abnormal += 1
+                        # 수신 시각은 msg.timestamp(POSIX) 사용, 없으면 현재 시각
+                        ts   = msg.timestamp or time.time()
+                        tstr = time.strftime("%H:%M:%S", time.localtime(ts))
+                        for alert in alerts:
+                            print(
+                                f"[{tstr}] ALERT  {alert}"
+                                f"  |  ID=0x{msg.arbitration_id:X}"
+                                f"  DLC={msg.dlc}",
+                                flush=True,
+                            )
+                    else:
+                        self._normal += 1
 
-            log(f"[RESULT] alerts={alerts}")
-            if alerts:
-                print(f"[ALERT] {alerts} | ts={msg.timestamp} dlc={msg.dlc}")
+                except can.CanOperationError as e:
+                    consecutive_errors += 1
+                    if consecutive_errors >= 5:
+                        print(f"[!] Bus error x5, reconnecting... ({e})")
+                        self._reconnect()
+                        consecutive_errors = 0
 
-# -----------------------------
-# 실행
-# -----------------------------
+                except can.CanError:
+                    pass
+
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.bus.shutdown()
+            self._print_summary()
+
+
 if __name__ == "__main__":
     ids = CAN_IDS()
     ids.run()
