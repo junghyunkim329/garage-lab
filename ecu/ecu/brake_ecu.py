@@ -7,7 +7,7 @@ try: s.setsockopt(SOL, getattr(socket,"CAN_RAW_FD_FRAMES",5), 1)
 except OSError: pass
 try: s.setsockopt(SOL, getattr(socket,"CAN_RAW_RECV_OWN_MSGS",4), 0)  # 자기수신 끔(중복 억제)
 except OSError: pass
-s.bind(("vcan2",)); print("[Brake] vcan2", flush=True)
+s.bind(("vcan1",)); print("[Brake] vcan2", flush=True)
 while True:
     r,_,_=select.select([s],[],[],1.0)
     if not r: continue

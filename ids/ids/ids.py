@@ -33,6 +33,13 @@ class CAN_IDS:
         self._normal   = 0
         self._abnormal = 0
 
+        # 이상 유형별 통계
+        self._alert_stats = {
+            "timestamp": 0,
+            "dlc": 0,
+            "flood": 0,
+        }
+
     # ------------------------------------------
     # 연결 / 재연결
     # ------------------------------------------
@@ -75,8 +82,10 @@ class CAN_IDS:
 
             if diff > TIMESTAMP_TOLERANCE:
                 alerts.append(f"Timestamp too old ({diff}s ago)")
+                self._alert_stats["timestamp"] += 1
             elif diff < -TIMESTAMP_TOLERANCE:
                 alerts.append(f"Timestamp in future ({-diff}s ahead)")
+                self._alert_stats["timestamp"] += 1
 
             if not alerts:
                 self._last_payload_ts[arb_id] = payload_ts
@@ -85,6 +94,7 @@ class CAN_IDS:
         max_dlc = 64 if self.is_fd else 8
         if msg.dlc > max_dlc:
             alerts.append(f"Invalid DLC ({msg.dlc} > {max_dlc})")
+            self._alert_stats["dlc"] += 1
 
         # ── 3. Flooding ───────────────────────────────────────────────────
         q = self._id_times[arb_id]
@@ -94,6 +104,7 @@ class CAN_IDS:
 
         if len(q) > FLOOD_THRESHOLD:
             alerts.append(f"Flooding ({len(q)} frames/s)")
+            self._alert_stats["flood"] += 1
 
         return alerts
 
@@ -106,6 +117,11 @@ class CAN_IDS:
             f"  총 수신   {self._total:>6} 패킷\n"
             f"  정상      {self._normal:>6} 패킷\n"
             f"  이상 탐지 {self._abnormal:>6} 패킷\n"
+            f"{'─'*48}\n"
+            f"  ─ 이상 유형별 통계 ─\n"
+            f"  Timestamp      {self._alert_stats['timestamp']:>6}\n"
+            f"  DLC            {self._alert_stats['dlc']:>6}\n"
+            f"  Flood          {self._alert_stats['flood']:>6}\n"
             f"{'─'*48}"
         )
 
