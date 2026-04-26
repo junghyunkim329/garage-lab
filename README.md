@@ -10,13 +10,13 @@
 
 ## 📂 파일 구성 및 역할
 
-1.  **`brake_ecu.py`**
-    - 수신단 역할을 하는 하위 ECU(예: 제동 제어기) 시뮬레이터입니다.
-    - 게이트웨이를 거쳐 전달된 최종 메시지를 수신하고 상태를 출력합니다.
-
-2.  **`gateway_ecu.py`**
+1.  **`gateway_ecu.py`**
     - 물리 CAN(`can1`)과 가상 CAN(`vcan0/1`) 사이를 연결하는 게이트웨이 ECU 역할을 수행합니다.
     - 네트워크 구간 분리 및 메시지 라우팅 기능을 모사합니다.
+
+2.  **`brake_ecu.py`**
+    - 수신단 역할을 하는 하위 ECU(예: 제동 제어기) 시뮬레이터입니다.
+    - 게이트웨이를 거쳐 전달된 최종 메시지를 수신하고 상태를 출력합니다.
 
 3.  **`gen.py` (공격 및 트래픽 생성기)**
     - 검증을 위한 트래픽 발생기입니다.
@@ -24,13 +24,13 @@
 
 4.  **`ids.py` (핵심 산출물)**
     - 차량 침입 탐지 시스템 메인 로직입니다.
-    - **탐지 항목:** Flooding(공격성 폭주), Timestamp Anomaly(주기성 변조), DLC Mismatch(데이터 구조 위반).
+    - **탐지 항목:** Flooding(공격성 폭주), Timestamp Anomaly(주기성 변조), DLC Mismatch(데이터 구조 위반)
     - 실시간으로 버스를 모니터링하여 이상 징후 발생 시 경고 로그를 출력합니다.
 
 ## 🛠 실행 환경 및 요구 사항
 
 - **Hardware:** Raspberry Pi 4B, MCP2515 기반 CAN HAT
-- **OS:** Raspberry Pi OS (Linux)
+- **OS:** Raspberry Pi OS
 - **Language:** Python 3.8+
 - **Dependencies:** `python-can`, `SocketCAN` 인터페이스 활성화 필요
 
