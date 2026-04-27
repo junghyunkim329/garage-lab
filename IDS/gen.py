@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------
-# Classic CAN Generator — Multi‑Mode Selectable
-#
-# 기능:
-#  - Timestamp anomaly (replay / future)
-#  - DLC > 8 (Classic CAN protocol violation)
-#  - Flooding attack
-#  - Normal traffic
-#
-# 특징:
-#  - --mode 옵션으로 여러 트래픽을 순서대로 실행 가능
-#    예) --mode timestamp normal dlc flood
-# ------------------------------------------------------------
 
 import can
 import time
@@ -24,7 +11,7 @@ import argparse
 # ============================================================
 
 CHANNEL          = "can0"     # 트래픽을 송신할 CAN 인터페이스
-PACKET_COUNT     = 100        # 각 mode 당 전송할 프레임 수
+PACKET_COUNT     = 100        # 각 mode 당 전송할 (최대) 프레임 수
 NORMAL_INTERVAL  = 0.05       # 50ms (20fps) → flood 탐지 안 걸리는 속도
 
 # IDS 규칙과 맞춘 CAN ID
@@ -51,6 +38,10 @@ class CANGenerator:
             interface="socketcan",
             channel=CHANNEL
         )
+        
+        # 난수로 결정된 공격 횟수를 저장할 변수 초기화
+        self.timestamp_attack_count = 0
+        self.dlc_attack_count = 0
 
     # --------------------------------------------------------
     # 1. Timestamp anomaly
@@ -58,7 +49,10 @@ class CANGenerator:
     #    - 과거(replay) / 미래(timestamp jump) 상황 생성
     # --------------------------------------------------------
     def send_timestamp(self):
-        for i in range(PACKET_COUNT):
+        # PACKET_COUNT 한도 내에서 난수로 공격 횟수 결정 및 저장
+        self.timestamp_attack_count = random.randint(1, PACKET_COUNT)
+        
+        for i in range(self.timestamp_attack_count):
             # 짝수: 과거 timestamp / 홀수: 미래 timestamp
             ts = int(time.time()) - 60 if i % 2 == 0 else int(time.time()) + 1000
 
@@ -74,14 +68,17 @@ class CANGenerator:
             self.bus.send(msg)
             time.sleep(NORMAL_INTERVAL)
 
-        print("[*] timestamp anomaly sent")
+        print(f"[*] timestamp anomaly sent ({self.timestamp_attack_count} frames)")
 
     # --------------------------------------------------------
     # 2. DLC mismatch (> 8)
     #    - Classic CAN 규격 위반
     # --------------------------------------------------------
     def send_dlc(self):
-        for _ in range(PACKET_COUNT):
+        # PACKET_COUNT 한도 내에서 난수로 공격 횟수 결정 및 저장
+        self.dlc_attack_count = random.randint(1, PACKET_COUNT)
+        
+        for _ in range(self.dlc_attack_count):
             dlc = random.choice([9, 10, 11, 12])  # 불법 DLC
             data = rand_bytes(8)                  # 실제 데이터는 8바이트
 
@@ -94,7 +91,7 @@ class CANGenerator:
             self.bus.send(msg)
             time.sleep(NORMAL_INTERVAL)
 
-        print("[*] DLC mismatch sent")
+        print(f"[*] DLC mismatch sent ({self.dlc_attack_count} frames)")
 
     # --------------------------------------------------------
     # 3. Flooding attack
@@ -146,6 +143,12 @@ class CANGenerator:
     # 종료 처리
     # --------------------------------------------------------
     def close(self):
+        # 종료 전 공격 횟수가 저장된 변수 출력
+        print("\n[+] --- Attack Summary ---")
+        print(f"[+] Randomized Timestamp Attacks Generated : {self.timestamp_attack_count}")
+        print(f"[+] Randomized DLC Attacks Generated       : {self.dlc_attack_count}")
+        print("[+] ----------------------\n")
+        
         self.bus.shutdown()
 
 
@@ -180,5 +183,5 @@ if __name__ == "__main__":
             elif mode == "normal":
                 gen.send_normal()
     finally:
-        # 항상 CAN 인터페이스 정리
+        # 항상 CAN 인터페이스 정리 및 난수 카운트 변수 출력
         gen.close()
