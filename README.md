@@ -36,6 +36,6 @@
 
 <br/>
 
-**TEAM:** [차고연구실/김정현 양승권 임성준]
+**TEAM:** [차고연구실 / 김정현 양승권 임성준]
 <br/>
 **Project:** 2026 INC0GNITO FESTIVAL
